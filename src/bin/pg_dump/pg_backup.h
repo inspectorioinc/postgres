@@ -160,6 +160,9 @@ typedef struct _dumpOptions
 	bool		outputBlobs;
 	int			outputNoOwner;
 	char	   *outputSuperuser;
+
+	const char		*active_schema;
+	const char		*output_schema;
 } DumpOptions;
 
 /*

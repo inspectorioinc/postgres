@@ -155,7 +155,7 @@ fmtQualifiedId(int remoteVersion, const char *schema, const char *id)
 	/* Suppress schema name if fetching from pre-7.3 DB */
 	if (remoteVersion >= 70300 && schema && *schema)
 	{
-		appendPQExpBuffer(lcl_pqexp, "%s.", fmtId(schema));
+		appendPQExpBuffer(lcl_pqexp, "");
 	}
 	appendPQExpBufferStr(lcl_pqexp, fmtId(id));
 

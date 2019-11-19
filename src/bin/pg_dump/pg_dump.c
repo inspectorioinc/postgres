@@ -339,6 +339,7 @@ main(int argc, char **argv)
 		{"encoding", required_argument, NULL, 'E'},
 		{"help", no_argument, NULL, '?'},
 		{"version", no_argument, NULL, 'V'},
+		{"output-schema", required_argument, NULL, 'z'},
 
 		/*
 		 * the following options don't have an equivalent short option letter
@@ -404,7 +405,7 @@ main(int argc, char **argv)
 
 	InitDumpOptions(&dopt);
 
-	while ((c = getopt_long(argc, argv, "abcCd:E:f:F:h:j:n:N:oOp:RsS:t:T:U:vwWxZ:",
+	while ((c = getopt_long(argc, argv, "abcCd:E:f:F:h:j:n:z:N:oOp:RsS:t:T:U:vwWxZ:",
 							long_options, &optindex)) != -1)
 	{
 		switch (c)
@@ -451,9 +452,14 @@ main(int argc, char **argv)
 
 			case 'n':			/* include schema(s) */
 				simple_string_list_append(&schema_include_patterns, optarg);
+				dopt.active_schema = pg_strdup(optarg);
 				dopt.include_everything = false;
 				break;
 
+			case 'z':
+				dopt.output_schema = pg_strdup(optarg);
+				break;
+			
 			case 'N':			/* exclude schema(s) */
 				simple_string_list_append(&schema_exclude_patterns, optarg);
 				break;
@@ -983,8 +989,8 @@ setup_connection(Archive *AH, const char *dumpencoding,
 	PGconn	   *conn = GetConnection(AH);
 	const char *std_strings;
 
-	if (AH->remoteVersion >= 70300)
-		PQclear(ExecuteSqlQueryForSingleRow(AH, ALWAYS_SECURE_SEARCH_PATH_SQL));
+	// if (AH->remoteVersion >= 70300)
+		// PQclear(ExecuteSqlQueryForSingleRow(AH, ALWAYS_SECURE_SEARCH_PATH_SQL));
 
 	/*
 	 * Set the client encoding if requested.
@@ -1141,6 +1147,11 @@ setup_connection(Archive *AH, const char *dumpencoding,
 
 		AH->sync_snapshot_id = get_synchronized_snapshot(AH);
 	}
+
+	PQExpBuffer query = createPQExpBuffer();
+	appendPQExpBuffer(query, "SET search_path TO %s;", dopt->active_schema);
+	ExecuteSqlStatement(AH, query->data);
+	destroyPQExpBuffer(query);	
 }
 
 /* Set up connection for a parallel worker process */
@@ -1302,10 +1313,7 @@ expand_table_name_patterns(Archive *fout,
 							  false, "n.nspname", "c.relname", NULL,
 							  "pg_catalog.pg_table_is_visible(c.oid)");
 
-		ExecuteSqlStatement(fout, "RESET search_path");
-		res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);
-		PQclear(ExecuteSqlQueryForSingleRow(fout,
-											ALWAYS_SECURE_SEARCH_PATH_SQL));
+		res = ExecuteSqlQuery(fout, query->data, PGRES_TUPLES_OK);		
 		if (strict_names && PQntuples(res) == 0)
 			exit_horribly(NULL, "no matching tables were found for pattern \"%s\"\n", cell->val);
 
@@ -2885,9 +2893,14 @@ dumpSearchPath(Archive *AH)
 		 */
 		appendPQExpBufferStr(path, "public");
 	}
+	
+	DumpOptions *dopt = AH->dopt;
 
 	appendPQExpBufferStr(qry, "SELECT pg_catalog.set_config('search_path', ");
-	appendStringLiteralAH(qry, path->data, AH);
+	// appendPQExpBufferStr(qry, "\'\"ins-temp-dump\"\'");
+	appendPQExpBufferStr(qry, "\'\"");
+	appendPQExpBufferStr(qry, dopt->output_schema);
+	appendPQExpBufferStr(qry, "\"\'");
 	appendPQExpBufferStr(qry, ", false);\n");
 
 	if (g_verbose)
@@ -9145,6 +9158,11 @@ dumpComment(Archive *fout, const char *type, const char *name,
 	/* If a comment exists, build COMMENT ON statement */
 	if (ncomments > 0)
 	{
+		if (strcmp(type, "SCHEMA") == 0)
+		{
+		    return;
+		}
+
 		PQExpBuffer query = createPQExpBuffer();
 		PQExpBuffer tag = createPQExpBuffer();
 
@@ -9482,7 +9500,7 @@ dumpDumpableObject(Archive *fout, DumpableObject *dobj)
 			dumpAttrDef(fout, (AttrDefInfo *) dobj);
 			break;
 		case DO_INDEX:
-			dumpIndex(fout, (IndxInfo *) dobj);
+			// dumpIndex(fout, (IndxInfo *) dobj);
 			break;
 		case DO_REFRESH_MATVIEW:
 			refreshMatViewData(fout, (TableDataInfo *) dobj);
@@ -9491,7 +9509,7 @@ dumpDumpableObject(Archive *fout, DumpableObject *dobj)
 			dumpRule(fout, (RuleInfo *) dobj);
 			break;
 		case DO_TRIGGER:
-			dumpTrigger(fout, (TriggerInfo *) dobj);
+			// dumpTrigger(fout, (TriggerInfo *) dobj);
 			break;
 		case DO_EVENT_TRIGGER:
 			dumpEventTrigger(fout, (EventTriggerInfo *) dobj);
@@ -11684,12 +11702,10 @@ dumpFunc(Archive *fout, FuncInfo *finfo)
 
 	funcsig_tag = format_function_signature(fout, finfo, false);
 
-	appendPQExpBuffer(delqry, "DROP FUNCTION %s.%s;\n",
-					  fmtId(finfo->dobj.namespace->dobj.name),
+	appendPQExpBuffer(delqry, "DROP FUNCTION %s;\n",					  
 					  funcsig);
 
-	appendPQExpBuffer(q, "CREATE FUNCTION %s.%s ",
-					  fmtId(finfo->dobj.namespace->dobj.name),
+	appendPQExpBuffer(q, "CREATE FUNCTION %s ",
 					  funcfullsig ? funcfullsig :
 					  funcsig);
 
